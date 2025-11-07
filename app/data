@@ -1,0 +1,264 @@
+This is a phased digital marketplace that connects project-sellers (start: municipalities) with capital providers (banks, funds, HNIs, retail). Phase-1 is a simple commitment-based flow for municipal projects; later phases add loan pools, bidding, tranches, and tokenisation. The platform’s success depends on strict admin validation, high-quality documents (DataRoom), clear access controls, and a robust audit/notification system. 
+
+Marketplace_Vision
+
+ 
+
+Marketplace_Spec_Feedback_Updat…
+
+What’s in each file (one-line)
+
+Marketplace_Vision.docx — Product vision and phase roadmap (Phase 1→4) + high-level flows. 
+
+Marketplace_Vision
+
+BA_Field_Catalogue.docx — Detailed domain model: Parties, Listings, Instruments, Projects, Offers, DataRoom, business rules. (Great for API/DB fields). 
+
+BA_Field_Catalogue
+
+Marketplace_Spec_Feedback_Updated.docx — Practical spec, bidding/allocation mechanics, tape/eligibility, and operational details for later phases. Useful for implementing Phase-2/3 features. 
+
+Marketplace_Spec_Feedback_Updat…
+
+Core business flow (simple)
+
+Seller (municipality) creates a Listing with project details + uploads DPRs to a DataRoom. 
+
+BA_Field_Catalogue
+
+Admin validates listing & documents; once validated listing goes Live. 
+
+Marketplace_Vision
+
+Buyers view DataRoom → place Commitments/Bids (Phase-1 commit_amount; Phase-2 add price/yield). 
+
+BA_Field_Catalogue
+
+Platform runs allocation/auction logic → Allocation recorded. Settlement happens off-platform (proof uploaded). 
+
+Marketplace_Vision
+
+Ongoing: Q&A, project updates, notifications, audit trail.
+
+Key domain entities you must implement early (must-have for Phase-1)
+
+(Fields in parentheses are the important ones called out in docs)
+
+Party (legal_name, registered_numbers, contacts, status). 
+
+BA_Field_Catalogue
+
+User (full_name, email, role, auth_policies). 
+
+BA_Field_Catalogue
+
+Listing / Project (title, category, funding_required, funds_secured, funding_gap auto, data_room). Funding gap is auto-calculated. 
+
+BA_Field_Catalogue
+
+Instrument (underlying_reference, economics, unitisation) — for Phase-1 mostly simple commit amounts. 
+
+BA_Field_Catalogue
+
+DataRoom / Document (policy, file_hash, watermarking, versions). 
+
+BA_Field_Catalogue
+
+Offer/Bid (Commitment) (buyer, amount, status, supporting docs). 
+
+BA_Field_Catalogue
+
+Allocation & SettlementLog (allocation amount, award_documents, proof_documents).
+
+MVP (Phase-1) — what to build first (priority list)
+
+User & Party onboarding + KYC placeholders (store identifiers). 
+
+BA_Field_Catalogue
+
+Listing + Project CRUD + DataRoom uploads (with version + hash + optional watermark). 
+
+BA_Field_Catalogue
+
+Admin validation workflow (validation checklist gating ‘live’ status). 
+
+BA_Field_Catalogue
+
+Commitments (place/withdraw) + real-time funding_gap update. (Important business rule). 
+
+BA_Field_Catalogue
+
+Q&A & Updates feed, Notifications (new listing, new commitment, updates). 
+
+BA_Field_Catalogue
+
+Audit trail for all actions; SettlementLog entry UI for off-platform proofs.
+
+These give a usable Phase-1 platform that demonstrates value without complex finance logic.
+
+Important business rules & validations (callouts)
+
+Project cannot go live until title, category, stage, description, location, timeline, funding_required, at least one DPR/approval doc, and admin validation are present. Enforce this server-side. 
+
+BA_Field_Catalogue
+
+Funding gap must always be computed = funding_required − funds_secured (update on commits). 
+
+BA_Field_Catalogue
+
+Commitment must be positive amount. Updating commitments must instantly affect funding gap. 
+
+BA_Field_Catalogue
+
+DataRoom visibility: Phase-1 open; later phases may require NDA gating / restricted access. Build access grants from day 1 (simple “open” + manual grant).
+
+Risks & suggested mitigations (practical)
+
+Low document quality / missing DPRs → buyers lose trust.
+Mitigation: strict admin validation checklist + file validation (hash, required types) + UI hints for missing items. 
+
+BA_Field_Catalogue
+
+Settlement happens off-platform (manual). This creates operational friction and trust gaps.
+Mitigation: require settlement proof uploads and a simple escrow/trustee reference field; show settlement status prominently on listing. 
+
+Marketplace_Vision
+
+Access control mistakes → leaks of sensitive data.
+Mitigation: implement AccessGrant model (view/download + expiry + via: open/club/bilateral). Log every download with watermarking. 
+
+BA_Field_Catalogue
+
+Complexity explosion when adding bidding/eligibility/ptc tranches later.
+Mitigation: design models to be future-ready (keep fields but hide in UI). Use feature flags for Phase-2/3. 
+
+Marketplace_Spec_Feedback_Updat…
+
+Poor tape data quality for DA pools (Phase-2).
+Mitigation: ingest validation reports, show stratification snapshots, and provide a “data quality” score to buyers. 
+
+Marketplace_Spec_Feedback_Updat…
+
+Implementation suggestions (practical tech + APIs)
+
+You (as a Java/Spring dev) can follow a pragmatic stack:
+
+Backend: Java Spring Boot (REST + Spring Security) — you already work with Spring.
+
+DB: Postgres (jsonb for flexible fields like key_metrics, economics, eligibility rules).
+
+File storage: S3 (or equivalent) for DataRoom; store file hash, version, watermark flag.
+
+Auth & KYC: Keycloak or Spring Security + JWT; tie users to Parties.
+
+Search & filters: ElasticSearch (optional later) for listings.
+
+Cache: Redis for funding_gap and notifications.
+
+Minimal REST endpoints (examples):
+
+POST /api/parties — register seller/buyer. 
+
+BA_Field_Catalogue
+
+POST /api/listings — create project listing. 
+
+BA_Field_Catalogue
+
+GET /api/listings — list with filters (type, category, funding_gap). 
+
+Marketplace_Spec_Feedback_Updat…
+
+POST /api/listings/{id}/documents — upload to DataRoom. 
+
+BA_Field_Catalogue
+
+POST /api/listings/{id}/commitments — place commitment/bid. 
+
+BA_Field_Catalogue
+
+POST /api/listings/{id}/admin/validate — admin validation action. 
+
+BA_Field_Catalogue
+
+GET /api/listings/{id}/dataroom?granted=true — show documents user can see. 
+
+BA_Field_Catalogue
+
+DB table suggestions: parties, users, listings, projects, instruments, documents, bids, allocations, settlement_logs, audit_events, access_grants.
+
+UX / product tips (to increase conversion)
+
+Show funding_gap prominently on listing cards; “% funded” is motivating. 
+
+BA_Field_Catalogue
+
+Make admin validation a stepper with clear missing-items checklist to speed onboarding. 
+
+BA_Field_Catalogue
+
+DataRoom preview (thumbnail + metadata) and “request download” flow for NDA/manual grant later. 
+
+BA_Field_Catalogue
+
+Q&A visible to all lenders and linked to each Listing (helps diligence). 
+
+BA_Field_Catalogue
+
+KPIs / acceptance criteria to measure success
+
+% of Listings that pass admin validation first time. 
+
+BA_Field_Catalogue
+
+Average time from listing creation → Live. 
+
+Marketplace_Vision
+
+% of funding gap closed per listing (speed/velocity). 
+
+BA_Field_Catalogue
+
+Number of disputes in settlement (aim for 0; track proofs uploaded). 
+
+Marketplace_Vision
+
+Open questions / assumptions you should confirm with product owners (good tickets)
+
+Will settlement ever be on-platform in the roadmap or always off-platform? (affects design). 
+
+Marketplace_Vision
+
+Exact KYC / document requirements per Party type (PAN, GSTN, ULB codes) — how strict? 
+
+BA_Field_Catalogue
+
+SLA for Q&A responses (there’s a rule mentioned but not value X days). Add explicit X. 
+
+BA_Field_Catalogue
+
+For Phase-2, do buyers run eligibility rules client-side or server-side? (impacts engine design). 
+
+Marketplace_Spec_Feedback_Updat…
+
+Suggested first 2-week sprint (practical actionable plan)
+
+Auth + Party/User model, basic KYC fields. (2–3 days) 
+
+BA_Field_Catalogue
+
+Listing + Project model + file upload to DataRoom (with file hash + version). (4–5 days) 
+
+BA_Field_Catalogue
+
+Admin validation flow + simple UI flagging missing docs. (2 days) 
+
+BA_Field_Catalogue
+
+Commitments API + funding_gap calculation + notification for new commitments. (3 days) 
+
+BA_Field_Catalogue
+
+Final insight (one sentence)
+
+This BRD is solid — it focuses on a low-friction Phase-1 (municipal projects) to prove marketplace value while keeping the data model future-ready for lending pools, tranches and tokenisation; your main priorities: data/document quality, admin validation, clear access controls, and an auditable settlement proof flow.

@@ -1,5 +1,5 @@
 """
-Run the FastAPI application in development mode
+Run the FastAPI application in development mode with minimal logging
 """
 import uvicorn
 import os
@@ -14,7 +14,7 @@ if __name__ == "__main__":
         "app.main:app",
         host=host,
         port=port,
-        reload=True,  # Auto-reload for development
-        log_level="info",
-        access_log=True
+        reload=False,  # Auto-reload for development
+        log_level="warning",  # Only show warnings and errors
+        access_log=True  # Disable access logs for cleaner output
     )

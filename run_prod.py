@@ -1,5 +1,5 @@
 """
-Run the FastAPI application in development mode
+Run the FastAPI application in production mode with full logging
 """
 import uvicorn
 import os
@@ -10,11 +10,14 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "127.0.0.1")  # Use 127.0.0.1 for Windows compatibility
     port = int(os.getenv("PORT", "8000"))
     
+    # Check if running on Windows
+    is_windows = os.name == 'nt'
+    
     uvicorn.run(
         "app.main:app",
         host=host,
         port=port,
-        reload=True,  # Auto-reload for development
+        reload=False,  # No auto-reload in production
         log_level="info",
-        access_log=True
+        workers=1 if is_windows else 4  # Single worker on Windows, multiple on Unix
     )

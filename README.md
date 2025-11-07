@@ -1,15 +1,18 @@
-# Blog API with FastAPI
+# Munify API with FastAPI
 
-A simple blog API built with FastAPI and MySQL.
+A municipal funding platform API built with FastAPI and PostgreSQL.
 
 ## Features
 
-- User management (CRUD operations)
-- Post management (CRUD operations)
-- Comment system
-- MySQL database integration
+- User management and authentication
+- Organization management
+- Project management
+- Commitment tracking
+- Document management
+- PostgreSQL database integration
 - RESTful API endpoints
 - Automatic API documentation
+- Alembic database migrations
 
 ## Project Structure
 
@@ -51,29 +54,78 @@ blog-project/
 
 ## Setup Instructions
 
-### 1. Install Dependencies
+### Prerequisites
+
+- Python 3.11 or higher
+- PostgreSQL 12 or higher installed and running
+- PostgreSQL user with database creation privileges
+
+### 1. Clone the Repository
 
 ```bash
+git clone <repository-url>
+cd blog-project
+```
+
+### 2. Create Virtual Environment (Recommended)
+
+```bash
+# Windows
+python -m venv .venv
+.venv\Scripts\activate
+
+# Linux/Mac
+python -m venv .venv
+source .venv/bin/activate
+```
+
+### 3. Install Dependencies
+
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 2. Database Setup
+### 4. Configure Environment Variables
 
-Make sure MySQL is running on your system with the following credentials:
-- Host: 127.0.0.1
-- Port: 3306
-- Username: root
-- Password: root
-
-Run the database initialization script:
+Copy the example environment file and update with your PostgreSQL credentials:
 
 ```bash
-python database_init.py
+# Windows
+copy .env.example .env
+
+# Linux/Mac
+cp .env.example .env
 ```
 
-This will create the `blog_db` database and all necessary tables.
+Edit `.env` file and update PostgreSQL credentials:
 
-### 3. Run the Application
+```env
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_password
+POSTGRES_DB=munify_db
+```
+
+**Note:** The default password in `config.py` is `"root"`. If your PostgreSQL password is different, update `.env` file.
+
+### 5. Database Setup (Automatic)
+
+Alembic will automatically create the database and all tables when you run migrations:
+
+```bash
+alembic upgrade head
+```
+
+This command will:
+- ✅ Create the PostgreSQL database if it doesn't exist
+- ✅ Create all tables based on SQLAlchemy models
+- ✅ Apply all migrations
+
+**No manual database creation needed!**
+
+### 6. Run the Application
 
 ```bash
 python run.py
@@ -115,37 +167,107 @@ Once the application is running, you can access:
 
 ## Environment Variables
 
-You can customize the application by modifying the `.env` file:
+See `.env.example` for all available environment variables. Key variables:
 
 ```env
-MYSQL_HOST=127.0.0.1
-MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=root
-MYSQL_DATABASE=blog_db
-PROJECT_NAME=Blog API
-VERSION=1.0.0
+# PostgreSQL Configuration (Required)
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_password
+POSTGRES_DB=munify_db
+
+# Application Settings
+PROJECT_NAME=Munify API
+VERSION=0.1.0
 API_V1_STR=/api/v1
-BACKEND_CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+DEBUG=true
+APP_ENV=dev
+
+# Server Configuration
+HOST=127.0.0.1
+PORT=8000
+
+# CORS Origins
+BACKEND_CORS_ORIGINS=http://localhost:3000,http://localhost:8080,http://localhost:5173
 ```
 
 ## Development
 
 The application uses:
 - **FastAPI** for the web framework
-- **SQLAlchemy** for ORM
-- **PyMySQL** for MySQL database connection
+- **SQLAlchemy 2.0** for ORM
+- **PostgreSQL** as the database
+- **psycopg** for PostgreSQL database connection
+- **Alembic** for database migrations
 - **Pydantic** for data validation
 - **Passlib** for password hashing
 - **Uvicorn** as the ASGI server
 
-## Next Steps
+## Database Migrations
 
-To extend this blog API, you could add:
-- Authentication and authorization (JWT tokens)
-- File upload for post images
-- Categories and tags for posts
-- Search functionality
-- Rate limiting
-- Email notifications
-- Admin panel
+This project uses Alembic for database migrations. The database is automatically created when you run migrations.
+
+### Common Migration Commands
+
+```bash
+# Create a new migration
+alembic revision --autogenerate -m "description"
+
+# Apply all pending migrations
+alembic upgrade head
+
+# Rollback one migration
+alembic downgrade -1
+
+# Show current migration version
+alembic current
+
+# Show migration history
+alembic history
+```
+
+**Note:** The `alembic/env.py` file automatically creates the database if it doesn't exist, so you don't need to manually create it.
+
+## Quick Start for New Developers
+
+After cloning the repository:
+
+1. **Create virtual environment and install dependencies:**
+   ```bash
+   python -m venv .venv
+   .venv\Scripts\activate  # Windows
+   pip install -r requirements.txt
+   ```
+
+2. **Set up environment variables:**
+   ```bash
+   copy .env.example .env  # Windows
+   # Edit .env with your PostgreSQL credentials
+   ```
+
+3. **Initialize database (automatic):**
+   ```bash
+   alembic upgrade head
+   ```
+
+4. **Run the application:**
+   ```bash
+   python run.py
+   ```
+
+That's it! The database will be created automatically, and all tables will be set up.
+
+## Troubleshooting
+
+### Database Connection Issues
+
+- Ensure PostgreSQL is running: `pg_isready` or check PostgreSQL service
+- Verify credentials in `.env` file match your PostgreSQL setup
+- Check if PostgreSQL user has database creation privileges
+
+### Migration Issues
+
+- If migrations fail, check PostgreSQL connection settings
+- Ensure you're using the correct virtual environment
+- Run `alembic current` to check migration status

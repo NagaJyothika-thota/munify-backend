@@ -1,14 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from app.core.database import get_db
-from app.schemas.user import User, UserCreate, UserUpdate, UserResponse, UserListResponse
+from app.schemas.user import User, UserCreate, UserUpdate, UserResponse, UserListResponse, UserAndPartyResponse, UserWithParty, ExternalUserRegistration
 from app.models.user import User as UserModel
+from app.models.party import Party as PartyModel
 from passlib.context import CryptContext
+from app.core.config import settings
+from app.services.user_service import register_user_with_optional_roles
+from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
-# Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def get_password_hash(password: str):
@@ -23,16 +26,27 @@ def get_users(
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
-    """Get all users with pagination"""
-    query = db.query(UserModel)
+    """Get all users with pagination and associated party data"""
+    query = db.query(UserModel).options(joinedload(UserModel.party))
     total = query.count()
     users = query.offset(skip).limit(limit).all()
     return {"status": "success", "message": "Users fetched successfully", "data": users, "total": total}
 
-@router.get("/{user_id}", response_model=UserResponse, status_code=status.HTTP_200_OK)
+@router.get("/{user_id}", response_model=UserAndPartyResponse, status_code=status.HTTP_200_OK)
 def get_user(user_id: int, db: Session = Depends(get_db)):
-    """Get a specific user by ID"""
-    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    """Get a specific user by ID with associated party data"""
+    # Method 1: Use joinedload to eagerly load the party relationship (Recommended)
+    user = db.query(UserModel).options(joinedload(UserModel.party)).filter(UserModel.id == user_id).first()
+    
+    # Method 2: Alternative - Manual join query (if you need more control)
+    # user = db.query(UserModel, PartyModel).join(PartyModel, UserModel.party_id == PartyModel.id).filter(UserModel.id == user_id).first()
+    
+    # Method 3: Two separate queries (if you want to handle the case where party might be null)
+    # user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    # if user and user.party_id:
+    #     party = db.query(PartyModel).filter(PartyModel.id == user.party_id).first()
+    #     user.party = party
+    
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -43,21 +57,27 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
     """Create a new user"""
-    # Check if username or email already exists
-    existing_user = db.query(UserModel).filter(
-        (UserModel.username == user.username) | (UserModel.email == user.email)
-    ).first()
+    existing_user = db.query(UserModel).filter(UserModel.email == user.email).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Username or email already registered"
+            detail="Email already registered"
         )
     
+    # Validate party if provided
+    if user.party_id is not None:
+        party = db.query(PartyModel).filter(PartyModel.id == user.party_id).first()
+        if not party:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="party_id does not reference an existing Party"
+            )
+
     # Hash password
     hashed_password = get_password_hash(user.password)
     user_data = user.dict()
     user_data.pop("password")
-    user_data["hashed_password"] = hashed_password
+    user_data["password_hash"] = hashed_password
     
     db_user = UserModel(**user_data)
     db.add(db_user)
@@ -77,9 +97,8 @@ def update_user(user_id: int, user: UserUpdate, db: Session = Depends(get_db)):
     
     update_data = user.dict(exclude_unset=True)
     
-    # Hash password if provided
     if "password" in update_data:
-        update_data["hashed_password"] = get_password_hash(update_data.pop("password"))
+        update_data["password_hash"] = get_password_hash(update_data.pop("password"))
     
     for field, value in update_data.items():
         setattr(db_user, field, value)
@@ -101,3 +120,32 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
     db.delete(user)
     db.commit()
     return {"status": "success", "message": "User deleted successfully"}
+
+
+@router.post("/register")
+def register_external_user(payload: ExternalUserRegistration):
+    required_payload = {
+        "roleCode": "A",
+        "activated": True,
+        "userState": "ACTIVE",
+        "userType": "A",
+        "bankName": "Witfin",
+        "validUntil": "2035-09-22",
+        "accessType": "BRANCH",
+        "imeiNumber": "",
+        "langKey": "en",
+        "userRoles": [],
+        "userBranches": [],
+        "userName": payload.full_name,
+        "login": payload.login,
+        "password": payload.password,
+        "confirmPassword": payload.confirm_password,
+        "email": str(payload.email),
+        "mobileNumber": payload.mobile_number,
+        "branchId": 12,
+        "branchName": "Head Office",
+        "changePasswordOnLogin": True,
+    }
+
+    body, status_code, is_json = register_user_with_optional_roles(payload)
+    return JSONResponse(content=body if is_json else {"raw": body}, status_code=status_code)

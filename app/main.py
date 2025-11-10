@@ -15,6 +15,10 @@ from app.core.exceptions import (
     unhandled_exception_handler,
 )
 
+# Import all models to ensure SQLAlchemy can resolve relationships
+# This must happen before any database operations
+import app.models  # noqa: F401
+
 # Setup logging
 setup_logging()
 logger = get_logger("main")

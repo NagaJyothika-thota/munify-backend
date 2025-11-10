@@ -1,13 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
-from typing import List
+from typing import List, Optional
 from app.core.database import get_db
 from app.schemas.user import User, UserCreate, UserUpdate, UserResponse, UserListResponse, UserAndPartyResponse, UserWithParty, ExternalUserRegistration
 from app.models.user import User as UserModel
 from app.models.party import Party as PartyModel
 from passlib.context import CryptContext
 from app.core.config import settings
-from app.services.user_service import register_user_with_optional_roles
+from app.services.user_service import register_user_with_optional_roles, get_users_from_perdix
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -31,6 +31,27 @@ def get_users(
     total = query.count()
     users = query.offset(skip).limit(limit).all()
     return {"status": "success", "message": "Users fetched successfully", "data": users, "total": total}
+
+@router.get("/perdix", status_code=status.HTTP_200_OK)
+def get_perdix_users(
+    branch_name: Optional[str] = Query(None, description="Filter users by branch name"),
+    page: int = Query(1, ge=1, description="Page number for pagination"),
+    per_page: int = Query(10, ge=1, le=100, description="Number of items per page")
+):
+    """Get users list from Perdix API with pagination and optional branch filter"""
+    body, status_code, is_json = get_users_from_perdix(branch_name=branch_name, page=page, per_page=per_page)
+    
+    if status_code != 200:
+        raise HTTPException(
+            status_code=status_code,
+            detail=body if isinstance(body, str) else body.get("message", "Failed to fetch users from Perdix")
+        )
+    
+    return {
+        "status": "success",
+        "message": "Users fetched from Perdix successfully",
+        "data": body if is_json else {"raw": body}
+    }
 
 @router.get("/{user_id}", response_model=UserAndPartyResponse, status_code=status.HTTP_200_OK)
 def get_user(user_id: int, db: Session = Depends(get_db)):

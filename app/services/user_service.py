@@ -179,3 +179,43 @@ def register_user_with_optional_roles(payload) -> tuple:
     }, 201, True
 
 
+def get_users_from_perdix(branch_name: str = None, page: int = 1, per_page: int = 10) -> tuple:
+    """Get users list from Perdix system with pagination and optional branch filter"""
+    base_url = settings.PERDIX_BASE_URL.rstrip("/")
+    url = f"{base_url}/api/users"
+    
+    if not settings.PERDIX_JWT:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Perdix JWT is not configured")
+    
+    # Build query parameters
+    params = {
+        "page": page,
+        "per_page": per_page
+    }
+    if branch_name:
+        params["branchName"] = branch_name
+    
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "authorization": f"JWT {settings.PERDIX_JWT}",
+        "origin": settings.PERDIX_ORIGIN,
+        "referer": f"{settings.PERDIX_ORIGIN}/perdix-client/",
+        "page_uri": "Page/Engine/user.UserSearch",
+        "accept-language": "en-US,en;q=0.9,hi;q=0.8",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+    }
+    
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(url, headers=headers, params=params)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    
+    try:
+        return response.json(), response.status_code, True
+    except ValueError:
+        return response.text, response.status_code, False
+

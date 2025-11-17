@@ -6,18 +6,6 @@ This ensures all models are loaded before SQLAlchemy initializes mappers.
 # Import all models to ensure they're registered with SQLAlchemy
 # Order matters to avoid circular import issues, but string-based relationships help
 
-# Base models (no dependencies)
-
-
-# Models that depend on Party
-
-
-# Models that depend on User
-from app.models.project import Project
-
-
-
-
 # Standalone models
 from app.models.invitation import Invitation
 from app.models.project import Project

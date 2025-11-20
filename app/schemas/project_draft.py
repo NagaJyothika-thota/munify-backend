@@ -4,12 +4,13 @@ from decimal import Decimal
 from datetime import date, datetime
 
 
-class ProjectCreate(BaseModel):
-    organization_type: str = Field(..., description="Type of organization")
-    organization_id: str = Field(..., description="Organization ID")
-    title: str = Field(..., max_length=500, description="Project title")
+class ProjectDraftCreate(BaseModel):
+    """Schema for creating a new project draft - all fields optional"""
+    organization_type: Optional[str] = Field(None, description="Type of organization")
+    organization_id: Optional[str] = Field(None, description="Organization ID")
+    title: Optional[str] = Field(None, max_length=500, description="Project title")
     department: Optional[str] = Field(None, max_length=200, description="Department name")
-    contact_person: str = Field(..., max_length=255, description="Contact person name")
+    contact_person: Optional[str] = Field(None, max_length=255, description="Contact person name")
     contact_person_designation: Optional[str] = Field(None, max_length=255, description="Contact person designation")
     contact_person_email: Optional[str] = Field(None, max_length=255, description="Contact person email")
     contact_person_phone: Optional[str] = Field(None, max_length=50, description="Contact person phone")
@@ -22,23 +23,23 @@ class ProjectCreate(BaseModel):
     city: Optional[str] = Field(None, max_length=255, description="City")
     ward: Optional[str] = Field(None, max_length=255, description="Ward")
     total_project_cost: Optional[Decimal] = Field(None, description="Total project cost")
-    funding_requirement: Decimal = Field(..., description="Funding requirement amount")
+    funding_requirement: Optional[Decimal] = Field(None, description="Funding requirement amount")
     already_secured_funds: Optional[Decimal] = Field(0, description="Already secured funds")
     currency: Optional[str] = Field('INR', max_length=10, description="Currency code")
     fundraising_start_date: Optional[datetime] = Field(None, description="Fundraising start date")
     fundraising_end_date: Optional[datetime] = Field(None, description="Fundraising end date")
     municipality_credit_rating: Optional[str] = Field(None, max_length=20, description="Municipality credit rating")
     municipality_credit_score: Optional[Decimal] = Field(None, description="Municipality credit score")
-    status: Optional[str] = Field('draft', description="Project status")
     visibility: Optional[str] = Field('private', description="Project visibility: private or public")
     approved_by: Optional[str] = Field(None, max_length=255, description="User who approved the project")
     admin_notes: Optional[str] = Field(None, description="Administrative notes")
-    created_by: Optional[str] = Field(None, max_length=255, description="User who created the project")
+    last_saved_tab: Optional[str] = Field(None, description="Last saved tab: tab1, tab2, or tab3")
     
     model_config = ConfigDict(from_attributes=True)
 
 
-class ProjectUpdate(BaseModel):
+class ProjectDraftUpdate(BaseModel):
+    """Schema for updating a project draft - all fields optional"""
     organization_type: Optional[str] = Field(None, description="Type of organization")
     organization_id: Optional[str] = Field(None, description="Organization ID")
     title: Optional[str] = Field(None, max_length=500, description="Project title")
@@ -63,24 +64,22 @@ class ProjectUpdate(BaseModel):
     fundraising_end_date: Optional[datetime] = Field(None, description="Fundraising end date")
     municipality_credit_rating: Optional[str] = Field(None, max_length=20, description="Municipality credit rating")
     municipality_credit_score: Optional[Decimal] = Field(None, description="Municipality credit score")
-    status: Optional[str] = Field(None, description="Project status")
     visibility: Optional[str] = Field(None, description="Project visibility: private or public")
-    approved_at: Optional[datetime] = Field(None, description="Approval timestamp")
     approved_by: Optional[str] = Field(None, max_length=255, description="User who approved the project")
     admin_notes: Optional[str] = Field(None, description="Administrative notes")
-    updated_by: Optional[str] = Field(None, max_length=255, description="User who updated the project")
+    last_saved_tab: Optional[str] = Field(None, description="Last saved tab: tab1, tab2, or tab3")
     
     model_config = ConfigDict(from_attributes=True)
 
 
-class ProjectResponse(BaseModel):
+class ProjectDraftResponse(BaseModel):
+    """Schema for project draft response"""
     id: int
-    organization_type: str
-    organization_id: str
-    project_reference_id: str
-    title: str
+    organization_type: Optional[str] = None
+    organization_id: Optional[str] = None
+    title: Optional[str] = None
     department: Optional[str] = None
-    contact_person: str
+    contact_person: Optional[str] = None
     contact_person_designation: Optional[str] = None
     contact_person_email: Optional[str] = None
     contact_person_phone: Optional[str] = None
@@ -93,21 +92,18 @@ class ProjectResponse(BaseModel):
     city: Optional[str] = None
     ward: Optional[str] = None
     total_project_cost: Optional[Decimal] = None
-    funding_requirement: Decimal
+    funding_requirement: Optional[Decimal] = None
     already_secured_funds: Optional[Decimal] = None
-    commitment_gap: Optional[Decimal] = None
     currency: Optional[str] = None
     fundraising_start_date: Optional[datetime] = None
     fundraising_end_date: Optional[datetime] = None
     municipality_credit_rating: Optional[str] = None
     municipality_credit_score: Optional[Decimal] = None
-    status: Optional[str] = None
     visibility: Optional[str] = None
-    funding_raised: Optional[Decimal] = None
-    funding_percentage: Optional[Decimal] = None
-    approved_at: Optional[datetime] = None
     approved_by: Optional[str] = None
     admin_notes: Optional[str] = None
+    last_saved_tab: Optional[str] = None
+    completion_percentage: Optional[Decimal] = None
     created_at: Optional[datetime] = None
     created_by: Optional[str] = None
     updated_at: Optional[datetime] = None
@@ -116,11 +112,10 @@ class ProjectResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ProjectListResponse(BaseModel):
+class ProjectDraftListResponse(BaseModel):
+    """Schema for listing project drafts"""
     status: str
     message: str
-    data: list[ProjectResponse]
+    data: list[ProjectDraftResponse]
     total: int
-    
-    model_config = ConfigDict(from_attributes=True)
 

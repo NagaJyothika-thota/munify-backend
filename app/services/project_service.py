@@ -89,8 +89,8 @@ class ProjectService:
             # Set defaults
             if 'already_secured_funds' not in project_dict or project_dict['already_secured_funds'] is None:
                 project_dict['already_secured_funds'] = Decimal('0')
-            if 'currency' not in project_dict or project_dict['currency'] is None:
-                project_dict['currency'] = 'INR'
+            # Currency is always set by backend (ignore frontend value)
+            project_dict['currency'] = 'INR'
             if 'status' not in project_dict or project_dict['status'] is None:
                 project_dict['status'] = 'draft'
             if 'visibility' not in project_dict or project_dict['visibility'] is None:
@@ -178,6 +178,11 @@ class ProjectService:
             
             # Validate status, stage, and visibility if provided
             update_dict = project_data.model_dump(exclude_unset=True)
+            
+            # Currency is backend-controlled - remove if frontend tries to change it
+            if 'currency' in update_dict:
+                logger.warning(f"Attempted to update currency for project {project_id}. Currency is backend-controlled and will be ignored.")
+                del update_dict['currency']
             
             if 'status' in update_dict:
                 self._validate_status(update_dict['status'])

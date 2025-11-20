@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import master, auth, invitations, user_roles, organizations, projects, users
+from app.api.v1.endpoints import master, auth, invitations, user_roles, organizations, projects, users, project_drafts
 
 api_router = APIRouter()
 
@@ -9,4 +9,5 @@ api_router.include_router(user_roles.router, prefix="/user-roles", tags=["user-r
 api_router.include_router(organizations.router, prefix="/organizations", tags=["organizations"])
 api_router.include_router(master.router, prefix="/master", tags=["master"])
 api_router.include_router(projects.router, prefix="/projects", tags=["projects"])
+api_router.include_router(project_drafts.router, prefix="/project-drafts", tags=["project-drafts"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])

@@ -12,7 +12,6 @@ from app.models.project import Project
 from app.models.project_draft import ProjectDraft
 from app.models.project_category_master import ProjectCategoryMaster
 from app.models.project_stage_master import ProjectStageMaster
-from app.models.project_rejection_history import ProjectRejectionHistory
 
 # Export all models for convenience
 __all__ = [
@@ -21,6 +20,7 @@ __all__ = [
     "ProjectDraft",
     "ProjectCategoryMaster",
     "ProjectStageMaster",
+    "ProjectFavorite",
     "ProjectRejectionHistory",
 ]
 

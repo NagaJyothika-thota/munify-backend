@@ -29,26 +29,8 @@ def create_project_favorite(favorite_data: ProjectFavoriteCreate, db: Session = 
         )
 
 
-@router.get("/{favorite_id}", response_model=dict, status_code=status.HTTP_200_OK)
-def get_project_favorite(favorite_id: int, db: Session = Depends(get_db)):
-    """Get project favorite by ID"""
-    try:
-        service = ProjectFavoriteService(db)
-        favorite = service.get_favorite_by_id(favorite_id)
-        # Convert SQLAlchemy model to Pydantic schema
-        favorite_response = ProjectFavoriteResponse.model_validate(favorite)
-        return {
-            "status": "success",
-            "message": "Project favorite fetched successfully",
-            "data": favorite_response
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch project favorite: {str(e)}"
-        )
+
+
 
 
 @router.get("/", response_model=dict, status_code=status.HTTP_200_OK)
@@ -83,12 +65,19 @@ def get_project_favorites(
         )
 
 
-@router.delete("/{favorite_id}", status_code=status.HTTP_200_OK)
-def delete_project_favorite(favorite_id: int, db: Session = Depends(get_db)):
-    """Delete a project favorite by ID"""
+
+
+
+@router.delete("/", status_code=status.HTTP_200_OK)
+def delete_project_favorite_by_project_and_user(
+    project_reference_id: str = Query(..., description="Project reference ID"),
+    user_id: str = Query(..., description="User ID"),
+    db: Session = Depends(get_db)
+):
+    """Delete a project favorite by project_reference_id and user_id"""
     try:
         service = ProjectFavoriteService(db)
-        service.delete_project_favorite(favorite_id)
+        service.delete_project_favorite_by_project_and_user(project_reference_id, user_id)
         return {
             "status": "success",
             "message": "Project favorite deleted successfully"
@@ -100,4 +89,3 @@ def delete_project_favorite(favorite_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete project favorite: {str(e)}"
         )
-

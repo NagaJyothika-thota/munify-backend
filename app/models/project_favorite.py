@@ -15,7 +15,9 @@ class ProjectFavorite(Base):
     
     # Organization and user information
     organization_id = Column(String(255), nullable=False)
-    user_id = Column(String(255), nullable=False)
+    # Note: user_id references invitations.user_id but cannot have FK constraint since user_id is not unique in invitations
+    # Validation is done in service layer instead
+    user_id = Column(String(255), nullable=False, index=True)
     
     # Timestamps
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=True)
@@ -31,8 +33,8 @@ class ProjectFavorite(Base):
         viewonly=True
     )
     
-    # Unique constraint: one user can favorite a project only once per organization
+    # Unique constraint: one user can favorite a project only once (using project_reference_id and user_id)
     __table_args__ = (
-        UniqueConstraint('project_reference_id', 'organization_id', 'user_id', name='uq_project_favorite_org_user'),
+        UniqueConstraint('project_reference_id', 'user_id', name='uq_project_favorite_project_user'),
     )
 

@@ -15,6 +15,7 @@ from app.models.project_favorite import ProjectFavorite
 from app.models.project_rejection_history import ProjectRejectionHistory
 from app.models.commitment import Commitment
 from app.models.commitment_history import CommitmentHistory
+from app.models.project_note import ProjectNote
 
 # Export all models for convenience
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "CommitmentHistory",
     "Question",
     "QuestionReply",
+    "ProjectNote",
 ]

@@ -12,7 +12,9 @@ from app.schemas.commitment import (
     CommitmentStatusChangeRequest,
     CommitmentHistoryResponse,
 )
+from app.schemas.project import ProjectCommitmentsSummaryListResponse
 from app.services.commitment_service import CommitmentService
+from app.services.project_service import ProjectService
 
 
 router = APIRouter()
@@ -334,5 +336,85 @@ def get_commitment_history(
             detail=f"Failed to fetch commitment history: {str(exc)}",
         )
 
+
+@router.get(
+    "/summary/projects-summary",
+    response_model=ProjectCommitmentsSummaryListResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_projects_commitments_summary(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    db: Session = Depends(get_db),
+):
+    """
+    Get aggregated summary of projects with their commitments.
+    Returns unique projects from commitments table with:
+    - Project Reference ID
+    - Project Title
+    - Total Commitments count
+    - Status breakdown (Under_Review, Approved, Rejected, Withdrawn)
+    - Total Amount (under review)
+    - Best Deal (amount and interest rate)
+    - Latest Commitment Date
+    """
+    try:
+        service = ProjectService(db)
+        summaries, total = service.get_projects_commitments_summary(
+            skip=skip,
+            limit=limit,
+        )
+        
+        return {
+            "status": "success",
+            "message": "Projects commitments summary fetched successfully",
+            "data": summaries,
+            "total": total,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch projects commitments summary: {str(exc)}"
+        )
+
+
+@router.get(
+    "/commitment-details/by-project",
+    response_model=CommitmentListResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_commitments_by_project(
+    project_reference_id: str = Query(..., description="Project reference ID to filter commitments"),
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    db: Session = Depends(get_db),
+):
+    """Get all commitments for a specific project by project reference ID."""
+    try:
+        service = CommitmentService(db)
+        commitments, total = service.list_commitments(
+            skip=skip,
+            limit=limit,
+            project_reference_id=project_reference_id,
+            organization_id=None,
+            organization_type=None,
+            status_filter=None,
+        )
+        data = [CommitmentResponse.model_validate(c) for c in commitments]
+        return {
+            "status": "success",
+            "message": f"Commitments for project {project_reference_id} fetched successfully",
+            "data": data,
+            "total": total,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch commitments for project: {str(exc)}"
+        )
 
 

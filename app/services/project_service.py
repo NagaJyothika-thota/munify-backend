@@ -1,6 +1,6 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, case
 from fastapi import HTTPException, status
 from decimal import Decimal
 from datetime import datetime
@@ -518,5 +518,137 @@ class ProjectService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to resubmit project: {str(e)}"
+            )
+    
+    def get_projects_commitments_summary(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> Tuple[List[dict], int]:
+        """
+        Get aggregated summary of projects with their commitments.
+        Returns unique projects from commitments table with aggregated data.
+        """
+        logger.info("Fetching projects commitments summary")
+        
+        try:
+            # Main query with aggregations
+            # Join with projects to get title
+            query = (
+                self.db.query(
+                    Commitment.project_id,
+                    Project.title.label("project_title"),
+                    func.count(Commitment.id).label("total_commitments_count"),
+                    # Status breakdown counts
+                    func.sum(
+                        case((Commitment.status == "under_review", 1), else_=0)
+                    ).label("under_review_count"),
+                    func.sum(
+                        case((Commitment.status == "approved", 1), else_=0)
+                    ).label("approved_count"),
+                    func.sum(
+                        case((Commitment.status == "rejected", 1), else_=0)
+                    ).label("rejected_count"),
+                    func.sum(
+                        case((Commitment.status == "withdrawn", 1), else_=0)
+                    ).label("withdrawn_count"),
+                    # Total amount under review
+                    func.sum(
+                        case(
+                            (Commitment.status == "under_review", Commitment.amount),
+                            else_=Decimal("0")
+                        )
+                    ).label("total_amount_under_review"),
+                    # Latest commitment date
+                    func.max(Commitment.created_at).label("latest_commitment_date"),
+                )
+                .join(
+                    Project,
+                    Commitment.project_id == Project.project_reference_id,
+                    isouter=False
+                )
+                .group_by(Commitment.project_id, Project.title)
+            )
+            
+            # Get total count before pagination
+            total = query.count()
+            
+            # Apply pagination and ordering (by latest commitment date desc)
+            # Note: We need to use the alias for ordering since it's in the SELECT
+            results = (
+                query.order_by(func.max(Commitment.created_at).desc())
+                .offset(skip)
+                .limit(limit)
+                .all()
+            )
+            
+            # Process results and find best deal for each project
+            summary_list = []
+            for row in results:
+                project_ref_id = row.project_id
+                
+                # Find best deal: For loans, lowest interest rate; for others, highest amount
+                # Query all commitments for this project to find best deal
+                all_commitments = (
+                    self.db.query(Commitment)
+                    .filter(Commitment.project_id == project_ref_id)
+                    .all()
+                )
+                
+                # Find best deal: For loans, lowest interest rate; for others, highest amount
+                best_deal_amount = None
+                best_deal_interest_rate = None
+                best_deal_funding_mode = None
+                
+                if all_commitments:
+                    # Filter loans with interest rate
+                    loans_with_rate = [
+                        c for c in all_commitments
+                        if c.funding_mode == "loan" and c.interest_rate is not None
+                    ]
+                    
+                    if loans_with_rate:
+                        # Best deal = loan with lowest interest rate
+                        best_commitment = min(
+                            loans_with_rate,
+                            key=lambda x: x.interest_rate
+                        )
+                        best_deal_amount = best_commitment.amount
+                        best_deal_interest_rate = best_commitment.interest_rate
+                        best_deal_funding_mode = best_commitment.funding_mode
+                    else:
+                        # No loans with rate, use highest amount commitment
+                        best_commitment = max(
+                            all_commitments,
+                            key=lambda x: x.amount
+                        )
+                        best_deal_amount = best_commitment.amount
+                        best_deal_interest_rate = best_commitment.interest_rate
+                        best_deal_funding_mode = best_commitment.funding_mode
+                
+                summary_dict = {
+                    "project_reference_id": project_ref_id,
+                    "project_title": row.project_title,
+                    "total_commitments_count": row.total_commitments_count or 0,
+                    "status_under_review": int(row.under_review_count or 0),
+                    "status_approved": int(row.approved_count or 0),
+                    "status_rejected": int(row.rejected_count or 0),
+                    "status_withdrawn": int(row.withdrawn_count or 0),
+                    "total_amount_under_review": row.total_amount_under_review or Decimal("0"),
+                    "best_deal_amount": best_deal_amount,
+                    "best_deal_interest_rate": best_deal_interest_rate,
+                    "best_deal_funding_mode": best_deal_funding_mode,
+                    "latest_commitment_date": row.latest_commitment_date,
+                }
+                summary_list.append(summary_dict)
+            
+            logger.info(f"Retrieved {len(summary_list)} project commitments summaries (total: {total})")
+            return summary_list, total
+            
+        except Exception as e:
+            logger.error(f"Error fetching projects commitments summary: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch projects commitments summary: {str(e)}"
             )
 

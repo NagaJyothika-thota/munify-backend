@@ -27,4 +27,6 @@ __all__ = [
     "ProjectRejectionHistory",
     "Commitment",
     "CommitmentHistory",
+    "Question",
+    "QuestionReply",
 ]

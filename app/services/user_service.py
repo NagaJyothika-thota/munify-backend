@@ -291,3 +291,45 @@ def get_users_from_perdix(branch_name: str = None, page: int = 1, per_page: int 
     except ValueError:
         return response.text, response.status_code, False
 
+
+def get_account_from_perdix(authorization_header: str) -> tuple:
+    """
+    Get account details from Perdix using the provided Authorization header.
+    
+    Args:
+        authorization_header: Authorization header value (can be "JWT <token>", "Bearer <token>", or just "<token>")
+    
+    Returns:
+        tuple: (response_body, status_code, is_json)
+    """
+    base_url = settings.PERDIX_BASE_URL.rstrip("/")
+    url = f"{base_url}/api/account"
+    
+    if not authorization_header:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header is required"
+        )
+    
+    # Normalize authorization header
+    # If it doesn't start with "JWT " or "Bearer ", assume it's just the token and prepend "JWT "
+    auth_header = authorization_header.strip()
+    if not (auth_header.startswith("JWT ") or auth_header.startswith("Bearer ") or 
+            auth_header.startswith("jwt ") or auth_header.startswith("bearer ")):
+        auth_header = f"JWT {auth_header}"
+    
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "authorization": auth_header,
+    }
+    
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    
+    try:
+        return response.json(), response.status_code, True
+    except ValueError:
+        return response.text, response.status_code, False

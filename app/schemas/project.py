@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
+from typing import Optional, List
 from decimal import Decimal
 from datetime import date, datetime
 from app.schemas.commitment import CommitmentResponse
@@ -195,5 +195,33 @@ class ProjectRejectionHistoryResponse(BaseModel):
     rejection_note: str
     resubmitted_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProjectCommitmentsSummaryResponse(BaseModel):
+    """Schema for aggregated project commitments summary"""
+    project_reference_id: str = Field(..., description="Project reference ID")
+    project_title: str = Field(..., description="Project title")
+    total_commitments_count: int = Field(..., description="Total number of commitments for this project")
+    status_under_review: int = Field(0, description="Count of commitments under review")
+    status_approved: int = Field(0, description="Count of approved commitments")
+    status_rejected: int = Field(0, description="Count of rejected commitments")
+    status_withdrawn: int = Field(0, description="Count of withdrawn commitments")
+    total_amount_under_review: Decimal = Field(..., description="Total amount of commitments under review")
+    best_deal_amount: Optional[Decimal] = Field(None, description="Best deal amount")
+    best_deal_interest_rate: Optional[Decimal] = Field(None, description="Best deal interest rate (lowest for loans)")
+    best_deal_funding_mode: Optional[str] = Field(None, description="Funding mode of best deal")
+    latest_commitment_date: Optional[datetime] = Field(None, description="Date of the latest commitment")
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProjectCommitmentsSummaryListResponse(BaseModel):
+    """Schema for list of project commitments summary"""
+    status: str
+    message: str
+    data: List[ProjectCommitmentsSummaryResponse]
+    total: int
     
     model_config = ConfigDict(from_attributes=True)

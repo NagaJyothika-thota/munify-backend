@@ -1,10 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Header
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from app.core.database import get_db
 from passlib.context import CryptContext
 from app.core.config import settings
-from app.services.user_service import register_user_with_optional_roles, get_users_from_perdix, get_user_from_perdix_by_login, update_user_in_perdix
+from app.services.user_service import (
+    register_user_with_optional_roles,
+    get_users_from_perdix,
+    get_user_from_perdix_by_login,
+    update_user_in_perdix,
+    get_account_from_perdix,
+)
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -70,3 +76,37 @@ def update_perdix_user(payload: dict):
     """Forward user update to Perdix (PUT /api/users)"""
     body, status_code, is_json = update_user_in_perdix(payload)
     return JSONResponse(content=body if is_json else {"raw": body}, status_code=status_code)
+
+
+@router.get("/account", status_code=status.HTTP_200_OK)
+def get_account(
+    authorization: str = Header(..., description="Authorization header with JWT token (format: 'JWT <token>' or 'Bearer <token>')")
+):
+    """
+    Get account details from Perdix using JWT token from Authorization header.
+    
+    The frontend should pass the JWT token in the Authorization header.
+    The token can be prefixed with 'JWT ' or 'Bearer ' or sent as-is.
+    """
+    try:
+        # Pass Authorization header as-is to service (service will normalize it)
+        body, status_code, is_json = get_account_from_perdix(authorization)
+        
+        if status_code != 200:
+            raise HTTPException(
+                status_code=status_code,
+                detail=body if isinstance(body, str) else body.get("message", "Failed to fetch account details from Perdix")
+            )
+        
+        return {
+            "status": "success",
+            "message": "Account details fetched successfully",
+            "data": body if is_json else {"raw": body}
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch account details: {str(exc)}"
+        )

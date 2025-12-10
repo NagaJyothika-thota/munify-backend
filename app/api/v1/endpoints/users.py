@@ -10,6 +10,7 @@ from app.services.user_service import (
     get_user_from_perdix_by_login,
     update_user_in_perdix,
     get_account_from_perdix,
+    get_branch_from_perdix,
 )
 from fastapi.responses import JSONResponse
 
@@ -39,20 +40,79 @@ def get_perdix_users(
 
 @router.get("/perdix/{login}", status_code=status.HTTP_200_OK)
 def get_perdix_user_by_login(login: str):
-    """Get single user details from Perdix by login/username"""
-    body, status_code, is_json = get_user_from_perdix_by_login(login)
+    """
+    Get single user details from Perdix by login/username.
+    
+    Additionally fetches branch names from userBranches array:
+    - First branch name -> org_type
+    - Second branch name -> org_name
+    """
+    try:
+        body, status_code, is_json = get_user_from_perdix_by_login(login)
 
-    if status_code != 200:
+        if status_code != 200:
+            raise HTTPException(
+                status_code=status_code,
+                detail=body if isinstance(body, str) else body.get("message", "Failed to fetch user from Perdix")
+            )
+
+        # If response is not JSON, return as-is
+        if not is_json or not isinstance(body, dict):
+            return {
+                "status": "success",
+                "message": "User fetched from Perdix successfully",
+                "data": body if is_json else {"raw": body}
+            }
+
+        # Extract userBranches array
+        user_branches = body.get("userBranches", [])
+        
+        # Initialize org_type and org_name
+        org_type = None
+        org_name = None
+        
+        # Fetch branch names for each branch in userBranches
+        if user_branches and len(user_branches) > 0:
+            # Fetch first branch name -> org_type
+            first_branch_id = user_branches[0].get("branchId")
+            if first_branch_id:
+                try:
+                    branch_body, branch_status, branch_is_json = get_branch_from_perdix(first_branch_id)
+                    if branch_status == 200 and branch_is_json and isinstance(branch_body, dict):
+                        org_type = branch_body.get("branchName")
+                except Exception as exc:
+                    # Log error but don't fail the request
+                    pass
+            
+            # Fetch second branch name -> org_name (if exists)
+            if len(user_branches) > 1:
+                second_branch_id = user_branches[1].get("branchId")
+                if second_branch_id:
+                    try:
+                        branch_body, branch_status, branch_is_json = get_branch_from_perdix(second_branch_id)
+                        if branch_status == 200 and branch_is_json and isinstance(branch_body, dict):
+                            org_name = branch_body.get("branchName")
+                    except Exception as exc:
+                        # Log error but don't fail the request
+                        pass
+
+        # Add org_type and org_name to the response
+        enhanced_body = body.copy()
+        enhanced_body["org_type"] = org_type
+        enhanced_body["org_name"] = org_name
+
+        return {
+            "status": "success",
+            "message": "User fetched from Perdix successfully",
+            "data": enhanced_body
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
         raise HTTPException(
-            status_code=status_code,
-            detail=body if isinstance(body, str) else body.get("message", "Failed to fetch user from Perdix")
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch user from Perdix: {str(exc)}"
         )
-
-    return {
-        "status": "success",
-        "message": "User fetched from Perdix successfully",
-        "data": body if is_json else {"raw": body}
-    }
 
 @router.get("/perdix/userid/{userid}", status_code=status.HTTP_200_OK)
 def get_perdix_user_by_userid(userid: str):

@@ -292,6 +292,53 @@ def get_users_from_perdix(branch_name: str = None, page: int = 1, per_page: int 
         return response.text, response.status_code, False
 
 
+def get_branch_from_perdix(branch_id: int) -> tuple:
+    """
+    Get branch details from Perdix by branch ID.
+    
+    Args:
+        branch_id: Branch ID to fetch details for
+    
+    Returns:
+        tuple: (response_body, status_code, is_json)
+    """
+    base_url = settings.PERDIX_BASE_URL.rstrip("/")
+    url = f"{base_url}/api/branch/{branch_id}"
+    
+    if not settings.PERDIX_JWT:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Perdix JWT is not configured"
+        )
+    
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9,hi;q=0.8",
+        "authorization": f"JWT {settings.PERDIX_JWT}",
+        "page_uri": "Page/Engine/management.BranchCreationSearch",
+        "priority": "u=1, i",
+        "referer": f"{settings.PERDIX_ORIGIN}/perdix-client/",
+        "sec-ch-ua": "\"Chromium\";v=\"142\", \"Google Chrome\";v=\"142\", \"Not_A Brand\";v=\"99\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+    }
+    
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    
+    try:
+        return response.json(), response.status_code, True
+    except ValueError:
+        return response.text, response.status_code, False
+
+
 def get_account_from_perdix(authorization_header: str) -> tuple:
     """
     Get account details from Perdix using the provided Authorization header.

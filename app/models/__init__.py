@@ -31,4 +31,5 @@ __all__ = [
     "Question",
     "QuestionReply",
     "ProjectNote",
+    "Dummy",
 ]

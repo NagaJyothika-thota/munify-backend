@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, ForeignKey, Text
+from sqlalchemy import Column, BigInteger, String, ForeignKey, Text, Integer
 from sqlalchemy.dialects.postgresql import TIMESTAMP, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy import text
@@ -11,6 +11,10 @@ class Dummy(Base):
     id = Column(BigInteger, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
+    status = Column(String(255), nullable=False)
+    age = Column(Integer, nullable=False)
+    quantity = Column(Integer, nullable=False)
+
 
 
     # Audit fields

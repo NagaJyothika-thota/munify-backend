@@ -9,12 +9,21 @@ from app.models.project_draft import ProjectDraft
 from app.schemas.project_draft import ProjectDraftCreate, ProjectDraftUpdate
 from app.core.logging import get_logger
 from app.services.project_service import ProjectService
+from app.services.project_service import ProjectService
 logger = get_logger("services.project_draft")
 
 
 class ProjectDraftService:
     def __init__(self, db: Session):
         self.db = db
+    
+    def _generate_project_reference_id(self) -> str:
+        """Generate unique project reference ID: PROJ-YYYY-XXXXX
+        Uses same logic as ProjectService to ensure consistency.
+        """
+        from app.services.project_service import ProjectService
+        project_service = ProjectService(self.db)
+        return project_service._generate_project_reference_id()
     
     def _calculate_completion_percentage(self, draft: ProjectDraft) -> Decimal:
         """Calculate completion percentage based on filled fields"""
@@ -141,6 +150,15 @@ class ProjectDraftService:
                 draft_dict['created_by'] = user_id
                 draft_dict['updated_by'] = user_id
             
+            # Generate project_reference_id if not provided
+            if 'project_reference_id' not in draft_dict or not draft_dict.get('project_reference_id'):
+                draft_dict['project_reference_id'] = self._generate_project_reference_id()
+                # Validate uniqueness
+                
+                project_service = ProjectService(self.db)
+                project_service._validate_project_reference_id_unique(draft_dict['project_reference_id'])
+                logger.info(f"Generated project_reference_id for draft: {draft_dict['project_reference_id']}")
+            
             # Create draft
             draft = ProjectDraft(**draft_dict)
             self.db.add(draft)
@@ -197,6 +215,82 @@ class ProjectDraftService:
                 detail=f"Project draft with ID {draft_id} not found"
             )
         return draft
+    
+    def get_draft_with_documents(self, draft_id: int, user_id: str = None) -> dict:
+        """
+        Get draft by ID with associated documents and file details.
+        
+        This method joins perdix_mp_project_documents and perdix_mp_files tables
+        to return complete file information for all documents linked to the draft.
+        
+        Args:
+            draft_id: Draft ID
+            user_id: Optional user ID for ownership validation
+            
+        Returns:
+            Dictionary containing draft data and documents with file details
+        """
+        from app.services.project_document_service import ProjectDocumentService
+        from app.schemas.project_draft import ProjectDraftResponse
+        
+        # Get draft
+        draft = self.get_draft_by_id(draft_id, user_id=user_id)
+        
+        # Get documents with file details using ProjectDocumentService
+        documents_data = []
+        if draft.project_reference_id:
+            document_service = ProjectDocumentService(self.db)
+            documents = document_service.get_project_documents(
+                project_reference_id=draft.project_reference_id
+            )
+            
+            # Build documents response with file details
+            for doc in documents:
+                doc_dict = {
+                    "id": doc.id,
+                    "project_id": doc.project_id,
+                    "file_id": doc.file_id,
+                    "document_type": doc.document_type,
+                    "version": doc.version,
+                    "access_level": doc.access_level,
+                    "uploaded_by": doc.uploaded_by,
+                    "created_at": doc.created_at,
+                    "created_by": doc.created_by,
+                    "updated_at": doc.updated_at,
+                    "updated_by": doc.updated_by,
+                }
+                
+                # Include file details from perdix_mp_files if available
+                if doc.file:
+                    file_dict = {
+                        "id": doc.file.id,
+                        "organization_id": doc.file.organization_id,
+                        "uploaded_by": doc.file.uploaded_by,
+                        "filename": doc.file.filename,
+                        "original_filename": doc.file.original_filename,
+                        "mime_type": doc.file.mime_type,
+                        "file_size": doc.file.file_size,
+                        "storage_path": doc.file.storage_path,
+                        "checksum": doc.file.checksum,
+                        "access_level": doc.file.access_level,
+                        "download_count": doc.file.download_count,
+                        "is_deleted": doc.file.is_deleted,
+                        "deleted_at": doc.file.deleted_at,
+                        "created_at": doc.file.created_at,
+                        "created_by": doc.file.created_by,
+                        "updated_at": doc.file.updated_at,
+                        "updated_by": doc.file.updated_by,
+                    }
+                    doc_dict["file"] = file_dict
+                
+                documents_data.append(doc_dict)
+        
+        # Convert draft to dict using schema (includes all fields)
+        draft_dict = ProjectDraftResponse.model_validate(draft).model_dump()
+        # Add documents with file details to the draft dict
+        draft_dict["documents"] = documents_data
+        
+        return draft_dict
     
     def get_drafts(
         self,
@@ -459,14 +553,24 @@ class ProjectDraftService:
             # This validates required fields and data types
             project_data = self.convert_draft_to_project_create(draft)
             
-            # Step 3: Create project using ProjectService
+            # Step 3: Create project using ProjectService with existing project_reference_id
             # Import here to avoid circular dependency
            
             project_service = ProjectService(self.db)
             
             try:
-                project = project_service.create_project(project_data)
-                logger.info(f"Project {project.id} created successfully from draft {draft_id}")
+                # Pass the draft's project_reference_id to reuse it
+                if not draft.project_reference_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Draft does not have a project_reference_id. This should not happen."
+                    )
+                
+                project = project_service.create_project(
+                    project_data, 
+                    project_reference_id=draft.project_reference_id
+                )
+                logger.info(f"Project {project.id} created successfully from draft {draft_id} with project_reference_id {draft.project_reference_id}")
             except HTTPException as e:
                 # Re-raise HTTPExceptions from project creation (validation errors, etc.)
                 logger.warning(f"Project creation failed for draft {draft_id}: {e.detail}")

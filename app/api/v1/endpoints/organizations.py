@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Header
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from decimal import Decimal
 
 from app.core.database import get_db
 from app.schemas.organization import (
@@ -19,27 +21,101 @@ from app.services.organization_service import (
     get_organizations_from_perdix,
     get_org_detail_by_org_id,
 )
+from app.core.logging import get_logger
+
+logger = get_logger("api.organizations")
 
 router = APIRouter()
 
 
 @router.post("/create", status_code=status.HTTP_201_CREATED)
 def create_organization(
-    payload: OrganizationCreate,
+    # Perdix API fields (required)
+    bank_id: int = Form(..., alias="bankId"),
+    parent_branch_id: int = Form(..., alias="parentBranchId"),
+    branch_name: str = Form(..., alias="branchName"),
+    branch_mail_id: str = Form(..., alias="branchMailId"),
+    pin_code: int = Form(..., alias="pinCode"),
+    branch_open_date: str = Form(..., alias="branchOpenDate"),
+    cash_limit: int = Form(default=0, alias="cashLimit"),
+    finger_print_device_type: str = Form(default="SAGEM", alias="fingerPrintDeviceType"),
+    # Extra fields stored in local DB
+    org_type: Optional[str] = Form(None, alias="orgType"),
+    pan_number: Optional[str] = Form(None, alias="panNumber"),
+    gst_number: Optional[str] = Form(None, alias="gstNumber"),
+    state: Optional[str] = Form(None),
+    district: Optional[str] = Form(None),
+    type_of_lender: Optional[str] = Form(None, alias="lenderType"),
+    annual_budget_size: Optional[str] = Form(None, alias="annualBudgetSize"),
+    designation: Optional[str] = Form(None),
+    created_by: Optional[str] = Form(None, alias="createdBy"),
+    updated_by: Optional[str] = Form(None, alias="updatedBy"),
+    # File uploads
+    pan_document: Optional[UploadFile] = File(None, alias="panDocument"),
+    gst_document: Optional[UploadFile] = File(None, alias="gstDocument"),
+    # Database session and user context
     db: Session = Depends(get_db),
+    uploaded_by: Optional[str] = Header(None, alias="X-User-Id"),
 ):
     """
-    Create a new organization (branch in Perdix).
+    Create a new organization (branch in Perdix) with optional PAN and GST document uploads.
+
+    Accepts multipart/form-data with the following fields:
+    - Perdix API fields: bankId, parentBranchId, branchName, branchMailId, pinCode, 
+      branchOpenDate, cashLimit, fingerPrintDeviceType
+    - Local DB fields: orgType, panNumber, gstNumber, state, district, lenderType, 
+      annualBudgetSize, designation, createdBy, updatedBy
+    - File uploads: panDocument (optional), gstDocument (optional)
 
     Flow:
-    1. Save extra organization details in local DB (perdix_mp_org_details)
-    2. Call Perdix branch API to actually create the organization
-    3. If Perdix call fails, local DB insert is rolled back.
+    1. Upload PAN and GST documents (if provided) to storage
+    2. Save extra organization details in local DB (perdix_mp_org_details) with file IDs
+    3. Call Perdix branch API to actually create the organization
+    4. If Perdix call fails, local DB insert is rolled back and uploaded files are deleted.
     """
     try:
-        body, status_code, is_json = create_organization_with_local_details(
-            payload, db
+        # Convert annual_budget_size from string to Decimal if provided
+        annual_budget_size_decimal = None
+        if annual_budget_size:
+            try:
+                annual_budget_size_decimal = Decimal(annual_budget_size)
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invalid annualBudgetSize format"
+                )
+        
+        # Create OrganizationCreate payload from form data
+        payload = OrganizationCreate(
+            bank_id=bank_id,
+            parent_branch_id=parent_branch_id,
+            branch_name=branch_name,
+            branch_mail_id=branch_mail_id,
+            pin_code=pin_code,
+            branch_open_date=branch_open_date,
+            cash_limit=cash_limit,
+            finger_print_device_type=finger_print_device_type,
+            org_type=org_type,
+            pan_number=pan_number,
+            gst_number=gst_number,
+            state=state,
+            district=district,
+            type_of_lender=type_of_lender,
+            annual_budget_size=annual_budget_size_decimal,
+            designation=designation,
+            created_by=created_by,
+            updated_by=updated_by,
         )
+        
+        # Call service with file uploads
+        body, status_code, is_json = create_organization_with_local_details(
+            payload=payload,
+            db=db,
+            pan_document=pan_document,
+            gst_document=gst_document,
+            uploaded_by=uploaded_by,
+        )
+        
         return JSONResponse(
             content=body if is_json else {"raw": body},
             status_code=status_code,
@@ -47,6 +123,7 @@ def create_organization(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to create organization: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create organization: {str(e)}",

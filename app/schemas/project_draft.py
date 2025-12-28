@@ -6,6 +6,7 @@ from datetime import date, datetime
 
 class ProjectDraftCreate(BaseModel):
     """Schema for creating a new project draft - all fields optional"""
+    project_reference_id: Optional[str] = Field(None, description="Project reference ID (auto-generated if not provided)")
     organization_type: Optional[str] = Field(None, description="Type of organization")
     organization_id: Optional[str] = Field(None, description="Organization ID")
     title: Optional[str] = Field(None, max_length=500, description="Project title")
@@ -94,6 +95,7 @@ class ProjectDraftUpdate(BaseModel):
 class ProjectDraftResponse(BaseModel):
     """Schema for project draft response"""
     id: int
+    project_reference_id: Optional[str] = None
     organization_type: Optional[str] = None
     organization_id: Optional[str] = None
     title: Optional[str] = None

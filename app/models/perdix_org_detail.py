@@ -1,6 +1,7 @@
-from sqlalchemy import Column, BigInteger, String, Numeric
+from sqlalchemy import Column, BigInteger, String, Numeric, ForeignKey
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 
 from app.core.database import Base
 
@@ -29,6 +30,10 @@ class PerdixOrgDetail(Base):
     type_of_lender = Column(String(100), nullable=True)
     annual_budget_size = Column(Numeric(15, 2), nullable=True)
 
+    # File references for PAN and GST documents
+    pan_document_id = Column(BigInteger, ForeignKey("perdix_mp_files.id"), nullable=True)
+    gst_document_id = Column(BigInteger, ForeignKey("perdix_mp_files.id"), nullable=True)
+
     created_by = Column(String(255), nullable=True)
     updated_at = Column(
         TIMESTAMP(timezone=True),
@@ -37,5 +42,9 @@ class PerdixOrgDetail(Base):
         nullable=False,
     )
     updated_by = Column(String(255), nullable=True)
+
+    # Relationships
+    pan_document = relationship("PerdixFile", foreign_keys=[pan_document_id], post_update=True)
+    gst_document = relationship("PerdixFile", foreign_keys=[gst_document_id], post_update=True)
 
 

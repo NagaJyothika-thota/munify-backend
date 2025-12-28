@@ -9,8 +9,11 @@ from app.schemas.project_draft import (
     ProjectDraftListResponse
 )
 from app.schemas.project import ProjectResponse
+from app.schemas.project_document import ProjectDocumentResponse
+from app.schemas.file import FileResponse
 from app.services.project_draft_service import ProjectDraftService
 from app.services.project_service import ProjectService
+from app.services.project_document_service import ProjectDocumentService
 
 router = APIRouter()
 
@@ -29,7 +32,8 @@ def create_draft(
         return {
             "status": "success",
             "message": "Project draft created successfully",
-            "data": draft_response
+            "data": draft_response,
+            "project_reference_id": draft.project_reference_id  # Include this for frontend
         }
     except HTTPException:
         raise
@@ -71,15 +75,14 @@ def get_draft(
     db: Session = Depends(get_db),
     user_id: Optional[str] = None  # TODO: Get from authenticated user context
 ):
-    """Get draft by ID"""
+    """Get draft by ID with associated documents and file details"""
     try:
         service = ProjectDraftService(db)
-        draft = service.get_draft_by_id(draft_id, user_id=user_id)
-        draft_response = ProjectDraftResponse.model_validate(draft)
+        draft_data = service.get_draft_with_documents(draft_id, user_id=user_id)
         return {
             "status": "success",
             "message": "Draft fetched successfully",
-            "data": draft_response
+            "data": draft_data
         }
     except HTTPException:
         raise

@@ -14,7 +14,8 @@ class ProjectDraft(Base):
     organization_id = Column(String(255), nullable=True)  # Nullable for drafts
     
     # Project Identification
-    # Note: project_reference_id not generated for drafts - will be generated on submit
+    # Note: project_reference_id is generated when draft is created (Approach 5)
+    project_reference_id = Column(String(100), nullable=True, unique=True, index=True)
     title = Column(String(500), nullable=True)  # Nullable for drafts
     department = Column(String(200), nullable=True)
     contact_person = Column(String(255), nullable=True)  # Nullable for drafts

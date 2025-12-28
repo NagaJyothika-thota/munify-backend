@@ -4,6 +4,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, EmailStr
 
+from app.schemas.file import FileResponse
+
 
 class OrganizationCreate(BaseModel):
     bank_id: int = Field(..., alias="bankId")
@@ -78,6 +80,10 @@ class PerdixOrgDetailResponse(BaseModel):
     district: Optional[str] = None
     type_of_lender: Optional[str] = Field(None, alias="typeOfLender")
     annual_budget_size: Optional[Decimal] = Field(None, alias="annualBudgetSize")
+    pan_document_id: Optional[int] = Field(None, alias="panDocumentId")
+    gst_document_id: Optional[int] = Field(None, alias="gstDocumentId")
+    pan_document: Optional[FileResponse] = None
+    gst_document: Optional[FileResponse] = None
     created_by: Optional[str] = Field(None, alias="createdBy")
     updated_at: Optional[datetime] = Field(None, alias="updatedAt")
     updated_by: Optional[str] = Field(None, alias="updatedBy")

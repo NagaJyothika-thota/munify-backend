@@ -13,6 +13,7 @@ from app.models.project_category_master import ProjectCategoryMaster
 from app.models.project_stage_master import ProjectStageMaster
 from app.models.project_favorite import ProjectFavorite
 from app.models.project_rejection_history import ProjectRejectionHistory
+from app.models.project_document import ProjectDocument
 from app.models.commitment import Commitment
 from app.models.commitment_history import CommitmentHistory
 from app.models.project_note import ProjectNote
@@ -29,6 +30,7 @@ __all__ = [
     "ProjectStageMaster",
     "ProjectFavorite",
     "ProjectRejectionHistory",
+    "ProjectDocument",
     "Commitment",
     "CommitmentHistory",
     "Question",

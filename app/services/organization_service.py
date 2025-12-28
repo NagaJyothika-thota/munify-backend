@@ -1,8 +1,13 @@
 import httpx
-from fastapi import HTTPException, status
+from typing import Optional
+from fastapi import HTTPException, status, UploadFile
 from app.core.config import settings
 from app.models.perdix_org_detail import PerdixOrgDetail
 from app.schemas.organization import OrganizationCreate, OrganizationUpdate
+from app.services.file_service import FileService
+from app.core.logging import get_logger
+
+logger = get_logger("services.organization")
 
 
 def create_organization_in_perdix(payload: OrganizationCreate) -> tuple:
@@ -152,67 +157,149 @@ def _validate_extra_fields(payload: OrganizationCreate) -> None:
 def create_organization_with_local_details(
     payload: OrganizationCreate,
     db,
+    pan_document: Optional[UploadFile] = None,
+    gst_document: Optional[UploadFile] = None,
+    uploaded_by: Optional[str] = None,
 ) -> tuple:
     """
-    Create organization in two steps within a single transactional flow:
-    1. Save extra details in our DB table `perdix_mp_org_details`
-    2. Call Perdix branch API to create the organization
+    Create organization in multiple steps (Perdix first, then files, then local DB):
+    1. Call Perdix branch API to create the organization and get org_id
+    2. Upload PAN and GST documents (if provided) using the real org_id
+    3. Save extra details in our DB table `perdix_mp_org_details` (including file IDs)
 
-    If the Perdix call fails, the local DB insert is rolled back.
+    Notes:
+    - If Perdix call fails, we return error immediately (no files uploaded, no local DB insert)
+    - If Perdix succeeds but file upload fails, the organization still exists in Perdix.
+      We save local details without the failed file IDs and allow re‑upload later.
+    - Files are always stored under the correct org_id path (no temporary org IDs).
+    
+    Args:
+        payload: Organization creation data
+        db: Database session
+        pan_document: Optional PAN document file
+        gst_document: Optional GST document file
+        uploaded_by: User ID who is uploading (for file upload tracking)
+    
+    Returns:
+        tuple: (response_body, status_code, is_json)
     """
     # Business validation based on org type
     _validate_extra_fields(payload)
 
-    org_detail = PerdixOrgDetail(
-        pan_number=payload.pan_number,
-        gst_number=payload.gst_number,
-        state=payload.state,
-        district=payload.district,
-        type_of_lender=payload.type_of_lender,
-        annual_budget_size=payload.annual_budget_size,
-        created_by=payload.created_by,
-        updated_by=payload.updated_by,
-    )
+    file_service = FileService(db)
+    uploaded_file_ids = []
+    pan_file_id: Optional[int] = None
+    gst_file_id: Optional[int] = None
 
     try:
-        # Stage 1: save local details but do not commit yet
-        db.add(org_detail)
-        db.flush()
-
-        # Stage 2: call Perdix
+        # Stage 1: Call Perdix FIRST to get the actual org_id
+        logger.info("Calling Perdix API to create organization in Perdix")
         body, status_code, is_json = create_organization_in_perdix(payload)
 
-        # If Perdix returns an error status, rollback our transaction
+        # If Perdix returns an error status, return immediately (no files or local DB)
         if status_code >= 400:
-            db.rollback()
-            # Surface Perdix error to client
             raise HTTPException(
                 status_code=status_code,
                 detail=body if is_json else str(body),
             )
 
-        # If Perdix response contains an organization/branch identifier,
-        # map it to our local record.
+        # Extract org_id from Perdix response
+        perdix_org_id = None
         if is_json and isinstance(body, dict):
-            # Adjust keys as per actual Perdix response structure
-            perdix_org_id = (
-                body.get("id")
-            )
-            if perdix_org_id is not None:
-                org_detail.org_id = perdix_org_id
-                db.flush()
+            perdix_org_id = body.get("id")
 
-        # All good – commit our local transaction
+        if not perdix_org_id:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Perdix API did not return organization ID",
+            )
+
+        logger.info(f"Organization created in Perdix with org_id: {perdix_org_id}")
+
+        # Stage 2: Upload files using the real org_id (so storage paths are correct)
+        if pan_document:
+            logger.info(f"Uploading PAN document for organization {perdix_org_id}")
+            try:
+                pan_file_record = file_service.upload_file(
+                    file=pan_document,
+                    organization_id=str(perdix_org_id),
+                    uploaded_by=uploaded_by or payload.created_by or "system",
+                    file_category="KYC",
+                    document_type="PAN",
+                    access_level="private",
+                    created_by=uploaded_by or payload.created_by
+                )
+                pan_file_id = pan_file_record.id
+                uploaded_file_ids.append(pan_file_id)
+                logger.info(f"PAN document uploaded successfully: {pan_file_id}")
+            except Exception as e:
+                logger.error(f"Failed to upload PAN document: {str(e)}")
+                # Don't fail the whole operation – org is already created in Perdix.
+                # We'll save org details without PAN file ID so it can be uploaded later.
+                pan_file_id = None
+        
+        if gst_document:
+            logger.info(f"Uploading GST document for organization {perdix_org_id}")
+            try:
+                gst_file_record = file_service.upload_file(
+                    file=gst_document,
+                    organization_id=str(perdix_org_id),
+                    uploaded_by=uploaded_by or payload.created_by or "system",
+                    file_category="KYC",
+                    document_type="GST",
+                    access_level="private",
+                    created_by=uploaded_by or payload.created_by
+                )
+                gst_file_id = gst_file_record.id
+                uploaded_file_ids.append(gst_file_id)
+                logger.info(f"GST document uploaded successfully: {gst_file_id}")
+            except Exception as e:
+                logger.error(f"Failed to upload GST document: {str(e)}")
+                # Don't fail the whole operation – org is already created in Perdix.
+                # We'll save org details without GST file ID so it can be uploaded later.
+                gst_file_id = None
+
+        # Stage 3: Save local details (including org_id and any file IDs we have)
+        org_detail = PerdixOrgDetail(
+            org_id=perdix_org_id,
+            pan_number=payload.pan_number,
+            gst_number=payload.gst_number,
+            state=payload.state,
+            district=payload.district,
+            type_of_lender=payload.type_of_lender,
+            annual_budget_size=payload.annual_budget_size,
+            created_by=payload.created_by,
+            updated_by=payload.updated_by,
+            pan_document_id=pan_file_id,
+            gst_document_id=gst_file_id,
+        )
+
+        db.add(org_detail)
         db.commit()
+        logger.info(f"Organization details saved successfully with org_id: {perdix_org_id}")
+
+        # Log warning if any file upload failed
+        if pan_document and not pan_file_id:
+            logger.warning(f"Organization {perdix_org_id} created but PAN document upload failed")
+        if gst_document and not gst_file_id:
+            logger.warning(f"Organization {perdix_org_id} created but GST document upload failed")
 
         return body, status_code, is_json
     except HTTPException:
-        # Already rolled back above for HTTP errors coming from Perdix
         raise
-    except Exception:
-        # Any other unexpected error – rollback and re-raise
+    except Exception as e:
+        # Any other unexpected error – rollback and try to clean up uploaded files
         db.rollback()
-        raise
+        for file_id in uploaded_file_ids:
+            try:
+                file_service.delete_file(file_id, uploaded_by or payload.created_by or "system")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to delete file {file_id} during error cleanup: {str(cleanup_error)}")
+        logger.error(f"Failed to create organization: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create organization: {str(e)}",
+        )
 
 
 def update_organization_in_perdix_raw(payload: dict) -> tuple:

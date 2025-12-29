@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, Header
+from typing import Optional
 from sqlalchemy.orm import Session
 from decimal import Decimal
 from typing import Optional
@@ -15,9 +16,227 @@ from app.schemas.project import (
     FullyFundedProjectResponse,
 )
 from app.services.project_service import ProjectService
+from app.services.project_document_service import ProjectDocumentService
 from app.schemas.commitment import CommitmentResponse
+from app.core.logging import get_logger
+
+logger = get_logger("api.projects")
 
 router = APIRouter()
+
+
+@router.post("/files/upload", response_model=dict, status_code=status.HTTP_201_CREATED)
+def upload_project_file(
+    file: UploadFile = File(..., description="File to upload"),
+    project_reference_id: Optional[str] = Form(None, description="Project reference ID (if draft/project exists)"),
+    draft_id: Optional[int] = Form(None, description="Draft ID (alternative to project_reference_id)"),
+    document_type: str = Form(..., description="Document type (dpr, feasibility_study, compliance_certificate, budget_approval, tender_rfp, project_image, optional_media)"),
+    organization_id: str = Form(..., description="Organization ID"),
+    access_level: str = Form("public", description="Access level: public, restricted, or private"),
+    auto_create_draft: bool = Form(True, description="Auto-create draft if project_reference_id doesn't exist"),
+    db: Session = Depends(get_db),
+    uploaded_by: Optional[str] = Header(None, alias="user_id", description="User ID who uploaded the file")
+):
+    """
+    Upload a file for a project or draft.
+    
+    This endpoint:
+    1. Accepts either project_reference_id OR draft_id
+    2. If project_reference_id provided, uses that
+    3. If draft_id provided, fetches draft's project_reference_id
+    4. If neither exists and auto_create_draft=True, generates project_reference_id and creates draft
+    5. Uploads the file using the generalized file upload service
+    6. Creates a record in perdix_mp_project_documents table
+    7. Returns the file_id and project_document_id
+    
+    **Document Types:**
+    - dpr: Detailed Project Report
+    - feasibility_study: Feasibility Study
+    - compliance_certificate: Compliance Certificate
+    - budget_approval: Budget Approval
+    - tender_rfp: Tender/RFP
+    - project_image: Project Image
+    - optional_media: Optional Media Files
+    
+    **Note**: The file_id returned should be used by the frontend to include in project creation/update payloads.
+    """
+    try:
+        if not uploaded_by:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User ID is required. Please provide user_id header."
+            )
+        
+        service = ProjectDocumentService(db)
+        
+        # If draft_id provided, get its project_reference_id
+        if draft_id and not project_reference_id:
+            from app.services.project_draft_service import ProjectDraftService
+            draft_service = ProjectDraftService(db)
+            draft = draft_service.get_draft_by_id(draft_id, user_id=uploaded_by)
+            project_reference_id = draft.project_reference_id
+            if not project_reference_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Draft {draft_id} does not have a project_reference_id"
+                )
+        
+        # If project_reference_id still not provided, generate one
+        if not project_reference_id:
+            from app.services.project_service import ProjectService
+            project_service = ProjectService(db)
+            project_reference_id = project_service._generate_project_reference_id()
+            project_service._validate_project_reference_id_unique(project_reference_id)
+            logger.info(f"Generated project_reference_id for file upload: {project_reference_id}")
+        
+        project_document = service.upload_project_file(
+            file=file,
+            project_reference_id=project_reference_id,
+            document_type=document_type,
+            uploaded_by=uploaded_by,
+            organization_id=organization_id,
+            access_level=access_level,
+            auto_create_draft=auto_create_draft
+        )
+        
+        return {
+            "status": "success",
+            "message": "Project file uploaded successfully",
+            "data": {
+                "file_id": project_document.file_id,
+                "project_document_id": project_document.id,
+                "document_type": project_document.document_type,
+                "project_reference_id": project_document.project_id
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Project file upload error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload project file: {str(e)}"
+        )
+
+
+@router.delete("/files/{file_id}", response_model=dict, status_code=status.HTTP_200_OK)
+def delete_project_file(
+    file_id: int,
+    project_reference_id: Optional[str] = Query(None, description="Optional project reference ID for validation"),
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Header(None, alias="user_id", description="User ID performing the deletion")
+):
+    """
+    Delete a project file.
+    
+    This endpoint:
+    1. Deletes the project document record from perdix_mp_project_documents
+    2. Soft deletes the file using the file service
+    
+    **Note**: Only the user who uploaded the file can delete it.
+    """
+    try:
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User ID is required. Please provide X-User-Id header."
+            )
+        
+        service = ProjectDocumentService(db)
+        service.delete_project_file(
+            file_id=file_id,
+            user_id=user_id,
+            project_reference_id=project_reference_id
+        )
+        
+        return {
+            "status": "success",
+            "message": "Project file deleted successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Project file delete error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete project file: {str(e)}"
+        )
+
+
+@router.get("/reference/{project_reference_id}/documents", response_model=dict, status_code=status.HTTP_200_OK)
+def get_project_documents(
+    project_reference_id: str,
+    document_type: Optional[str] = Query(None, description="Filter by document type (dpr, feasibility_study, compliance_certificate, budget_approval, tender_rfp, project_image, optional_media)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all documents for a project by project_reference_id.
+    
+    This endpoint returns all documents linked to the project with their
+    complete file details from perdix_mp_files table.
+    
+    Documents are returned ordered by most recent first (created_at desc).
+    Only non-deleted files are included.
+    
+    **Query Parameters:**
+    - `document_type`: Optional filter to get only specific document type
+    """
+    try:
+        # First verify project exists
+        project_service = ProjectService(db)
+        project = project_service.get_project_by_reference_id(project_reference_id)
+        
+        # Get documents with file details
+        document_service = ProjectDocumentService(db)
+        documents = document_service.get_project_documents(
+            project_reference_id=project_reference_id,
+            document_type=document_type
+        )
+        
+        # Build documents response with file details
+        documents_response = []
+        for doc in documents:
+            doc_dict = {
+                "id": doc.id,
+                "project_id": doc.project_id,
+                "file_id": doc.file_id,
+                "document_type": doc.document_type,
+                "version": doc.version,
+                "access_level": doc.access_level,
+                "uploaded_by": doc.uploaded_by,
+                "created_at": doc.created_at,
+                "created_by": doc.created_by,
+                "updated_at": doc.updated_at,
+                "updated_by": doc.updated_by,
+            }
+            
+            # Include file details from perdix_mp_files if available
+            if doc.file:
+                from app.schemas.file import FileResponse
+                doc_dict["file"] = FileResponse.model_validate(doc.file).model_dump()
+            
+            documents_response.append(doc_dict)
+        
+        return {
+            "status": "success",
+            "message": "Project documents fetched successfully",
+            "data": {
+                "project_reference_id": project_reference_id,
+                "project_title": project.title,
+                "documents": documents_response,
+                "total": len(documents_response)
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching project documents: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch project documents: {str(e)}"
+        )
 
 
 @router.post("/", response_model=dict, status_code=status.HTTP_201_CREATED)
@@ -185,18 +404,35 @@ def get_distinct_municipality_credit_ratings(db: Session = Depends(get_db)):
 
 
 @router.get("/{project_id}", response_model=dict, status_code=status.HTTP_200_OK)
-def get_project(project_id: int, db: Session = Depends(get_db)):
-    """Get project by ID"""
+def get_project(
+    project_id: int,
+    include_documents: bool = Query(False, description="Include documents with file details in response"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get project by ID.
+    
+    If `include_documents=true`, the response will include all documents
+    with their file details from perdix_mp_files table.
+    """
     try:
         service = ProjectService(db)
-        project = service.get_project_by_id(project_id)
-        # Convert SQLAlchemy model to Pydantic schema
-        project_response = ProjectResponse.model_validate(project)
-        return {
-            "status": "success",
-            "message": "Project fetched successfully",
-            "data": project_response
-        }
+        
+        if include_documents:
+            project_data = service.get_project_with_documents(project_id=project_id)
+            return {
+                "status": "success",
+                "message": "Project fetched successfully",
+                "data": project_data
+            }
+        else:
+            project = service.get_project_by_id(project_id)
+            project_response = ProjectResponse.model_validate(project)
+            return {
+                "status": "success",
+                "message": "Project fetched successfully",
+                "data": project_response
+            }
     except HTTPException:
         raise
     except Exception as e:
@@ -213,6 +449,7 @@ def get_project_by_reference(
         None,
         description="If provided, returns the existing commitment data for this project and committed_by (if any)",
     ),
+    include_documents: bool = Query(False, description="Include documents with file details in response"),
     db: Session = Depends(get_db),
 ):
     """
@@ -223,24 +460,46 @@ def get_project_by_reference(
     will also include full `commitment` data embedded inside the
     ProjectResponse (under data.commitment), so the caller can directly
     use it for edit (PUT) flows.
+    
+    If `include_documents=true`, the response will include all documents
+    with their file details from perdix_mp_files table.
     """
     try:
         service = ProjectService(db)
-        project, commitment = service.get_project_with_commitment_by_reference(
-            project_reference_id=project_reference_id,
-            committed_by=committed_by,
-        )
+        
+        if include_documents:
+            project_data = service.get_project_with_documents(project_reference_id=project_reference_id)
+            
+            # If committed_by is provided, add commitment data
+            if committed_by:
+                project, commitment = service.get_project_with_commitment_by_reference(
+                    project_reference_id=project_reference_id,
+                    committed_by=committed_by,
+                )
+                if commitment:
+                    project_data["commitment"] = CommitmentResponse.model_validate(commitment).model_dump()
+            
+            return {
+                "status": "success",
+                "message": "Project fetched successfully",
+                "data": project_data,
+            }
+        else:
+            project, commitment = service.get_project_with_commitment_by_reference(
+                project_reference_id=project_reference_id,
+                committed_by=committed_by,
+            )
 
-        # Convert SQLAlchemy model to Pydantic schemas
-        project_response = ProjectResponse.model_validate(project)
-        if commitment:
-            project_response.commitment = CommitmentResponse.model_validate(commitment)
+            # Convert SQLAlchemy model to Pydantic schemas
+            project_response = ProjectResponse.model_validate(project)
+            if commitment:
+                project_response.commitment = CommitmentResponse.model_validate(commitment)
 
-        return {
-            "status": "success",
-            "message": "Project fetched successfully",
-            "data": project_response,
-        }
+            return {
+                "status": "success",
+                "message": "Project fetched successfully",
+                "data": project_response,
+            }
     except HTTPException:
         raise
     except Exception as e:

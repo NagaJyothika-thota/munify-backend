@@ -10,7 +10,7 @@ from app.models.project_rejection_history import ProjectRejectionHistory
 from app.models.commitment import Commitment
 from app.schemas.project import ProjectCreate, ProjectUpdate
 from app.core.logging import get_logger
-
+from app.models.project_draft import ProjectDraft
 logger = get_logger("services.project")
 
 
@@ -19,29 +19,62 @@ class ProjectService:
         self.db = db
     
     def _generate_project_reference_id(self) -> str:
-        """Generate unique project reference ID: PROJ-YYYY-XXXXX"""
+        """Generate unique project reference ID: PROJ-YYYY-XXXXX
+        Counts both projects and drafts to ensure uniqueness across both tables.
+        """
+       
+        
         current_year = datetime.now().year
         
-        # Get the count of projects created this year
-        count_query = self.db.query(func.count(Project.id)).filter(
+        # Count projects created this year
+        project_count = self.db.query(func.count(Project.id)).filter(
             func.extract('year', Project.created_at) == current_year
-        )
-        count = count_query.scalar() or 0
+        ).scalar() or 0
+        
+        # Count drafts created this year (with project_reference_id)
+        draft_count = self.db.query(func.count(ProjectDraft.id)).filter(
+            ProjectDraft.project_reference_id.isnot(None),
+            func.extract('year', ProjectDraft.created_at) == current_year
+        ).scalar() or 0
+        
+        # Total count = projects + drafts
+        total_count = project_count + draft_count
         
         # Format: PROJ-YYYY-XXXXX (5 digits, zero-padded)
-        sequence = str(count + 1).zfill(5)
+        sequence = str(total_count + 1).zfill(5)
         return f"PROJ-{current_year}-{sequence}"
     
-    def _validate_project_reference_id_unique(self, project_reference_id: str, exclude_id: int = None):
-        """Validate that project_reference_id is unique"""
+    def _validate_project_reference_id_unique(
+        self, 
+        project_reference_id: str, 
+        exclude_id: int = None, 
+        exclude_draft_id: int = None
+    ):
+        """Validate that project_reference_id is unique across both projects and drafts"""
+        
+        
+        # Check in projects table
         query = self.db.query(Project).filter(Project.project_reference_id == project_reference_id)
         if exclude_id:
             query = query.filter(Project.id != exclude_id)
-        existing = query.first()
-        if existing:
+        existing_project = query.first()
+        
+        if existing_project:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Project reference ID '{project_reference_id}' already exists"
+                detail=f"Project reference ID '{project_reference_id}' already exists in projects"
+            )
+        
+        # Check in drafts table
+        draft_query = self.db.query(ProjectDraft).filter(ProjectDraft.project_reference_id == project_reference_id)
+        if exclude_draft_id:
+            draft_query = draft_query.filter(ProjectDraft.id != exclude_draft_id)
+        existing_draft = draft_query.first()
+        
+        if existing_draft:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Project reference ID '{project_reference_id}' already exists in drafts"
             )
     
     def _validate_status(self, status_value: str):
@@ -71,8 +104,14 @@ class ProjectService:
                 detail=f"Invalid visibility. Must be one of: {', '.join(valid_visibilities)}"
             )
     
-    def create_project(self, project_data: ProjectCreate) -> Project:
-        """Create a new project"""
+    def create_project(self, project_data: ProjectCreate, project_reference_id: Optional[str] = None) -> Project:
+        """Create a new project
+        
+        Args:
+            project_data: Project creation data
+            project_reference_id: Optional existing project_reference_id (from draft). 
+                                 If provided, uses this ID instead of generating a new one.
+        """
         logger.info(f"Creating project: {project_data.title}")
         
         try:
@@ -81,13 +120,32 @@ class ProjectService:
             self._validate_project_stage(project_data.project_stage)
             self._validate_visibility(project_data.visibility)
             
-            # Generate project reference ID
-            project_reference_id = self._generate_project_reference_id()
-            self._validate_project_reference_id_unique(project_reference_id)
+            # Use existing project_reference_id if provided, otherwise generate new one
+            if project_reference_id:
+                # When project_reference_id is provided, it comes from a draft submission.
+                # We only need to check if it exists in projects table (not drafts, 
+                # because it MUST exist in the draft being submitted).
+                existing_project = self.db.query(Project).filter(
+                    Project.project_reference_id == project_reference_id
+                ).first()
+                
+                if existing_project:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Project reference ID '{project_reference_id}' already exists in projects"
+                    )
+                
+                final_project_reference_id = project_reference_id
+                logger.info(f"Using existing project_reference_id: {final_project_reference_id}")
+            else:
+                # Generate new project reference ID
+                final_project_reference_id = self._generate_project_reference_id()
+                self._validate_project_reference_id_unique(final_project_reference_id)
+                logger.info(f"Generated new project_reference_id: {final_project_reference_id}")
             
             # Create project
             project_dict = project_data.model_dump(exclude_unset=True)
-            project_dict['project_reference_id'] = project_reference_id
+            project_dict['project_reference_id'] = final_project_reference_id
             
             # Set defaults
             if 'already_secured_funds' not in project_dict or project_dict['already_secured_funds'] is None:
@@ -141,6 +199,90 @@ class ProjectService:
                 detail=f"Project with reference ID '{project_reference_id}' not found"
             )
         return project
+    
+    def get_project_with_documents(self, project_id: int = None, project_reference_id: str = None) -> dict:
+        """
+        Get project by ID or reference ID with associated documents and file details.
+        
+        This method joins perdix_mp_project_documents and perdix_mp_files tables
+        to return complete file information for all documents linked to the project.
+        
+        Args:
+            project_id: Project ID (alternative to project_reference_id)
+            project_reference_id: Project reference ID (alternative to project_id)
+            
+        Returns:
+            Dictionary containing project data and documents with file details
+        """
+        from app.services.project_document_service import ProjectDocumentService
+        
+        # Get project
+        if project_id:
+            project = self.get_project_by_id(project_id)
+        elif project_reference_id:
+            project = self.get_project_by_reference_id(project_reference_id)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Either project_id or project_reference_id must be provided"
+            )
+        
+        # Get documents with file details using ProjectDocumentService
+        documents_data = []
+        if project.project_reference_id:
+            document_service = ProjectDocumentService(self.db)
+            documents = document_service.get_project_documents(
+                project_reference_id=project.project_reference_id
+            )
+            
+            # Build documents response with file details
+            for doc in documents:
+                doc_dict = {
+                    "id": doc.id,
+                    "project_id": doc.project_id,
+                    "file_id": doc.file_id,
+                    "document_type": doc.document_type,
+                    "version": doc.version,
+                    "access_level": doc.access_level,
+                    "uploaded_by": doc.uploaded_by,
+                    "created_at": doc.created_at,
+                    "created_by": doc.created_by,
+                    "updated_at": doc.updated_at,
+                    "updated_by": doc.updated_by,
+                }
+                
+                # Include file details from perdix_mp_files if available
+                if doc.file:
+                    file_dict = {
+                        "id": doc.file.id,
+                        "organization_id": doc.file.organization_id,
+                        "uploaded_by": doc.file.uploaded_by,
+                        "filename": doc.file.filename,
+                        "original_filename": doc.file.original_filename,
+                        "mime_type": doc.file.mime_type,
+                        "file_size": doc.file.file_size,
+                        "storage_path": doc.file.storage_path,
+                        "checksum": doc.file.checksum,
+                        "access_level": doc.file.access_level,
+                        "download_count": doc.file.download_count,
+                        "is_deleted": doc.file.is_deleted,
+                        "deleted_at": doc.file.deleted_at,
+                        "created_at": doc.file.created_at,
+                        "created_by": doc.file.created_by,
+                        "updated_at": doc.file.updated_at,
+                        "updated_by": doc.file.updated_by,
+                    }
+                    doc_dict["file"] = file_dict
+                
+                documents_data.append(doc_dict)
+        
+        # Convert project to dict using schema (includes all fields)
+        from app.schemas.project import ProjectResponse
+        project_dict = ProjectResponse.model_validate(project).model_dump()
+        # Add documents with file details to the project dict
+        project_dict["documents"] = documents_data
+        
+        return project_dict
 
     def get_project_with_commitment_by_reference(
         self,
